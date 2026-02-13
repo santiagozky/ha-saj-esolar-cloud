@@ -24,7 +24,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.util import dt as dt_util
 
-from .const import DEVICE_INFO, DIRECTION_STATES, BATTERY_STATES, DOMAIN, H1_SENSORS
+from .const import DIRECTION_STATES, BATTERY_STATES, DOMAIN, H1_SENSORS
 from .coordinator import SAJeSolarDataUpdateCoordinator
 
 # Device class mapping
@@ -127,11 +127,20 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
         self._attr_icon = sensor_config["icon"]
 
         # Create plant-specific device info
+        plant_data = coordinator.data.get(plant_uid, {})
+        energy_flow = plant_data.get("energy_flow", {}).get("data", {})
+        device_list = plant_data.get("device_list", {}).get("data", {}).get("list", [])
+        device_data = device_list[0] if device_list else {}
+        device_model = (
+            energy_flow.get("moduleModel")
+            or device_data.get("deviceModel")
+            or "H1"
+        )
         self._attr_device_info = {
             "identifiers": {(DOMAIN, plant_uid)},
             "name": plant_name,
             "manufacturer": "SAJ",
-            "model": "H1",
+            "model": device_model,
         }
 
         # Set device class from mapping
@@ -166,7 +175,10 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
 
             # Plant Detail Sensors - map from new plant data structure
             if self._sensor_key == "nowPower":
-                return float(device_data.get("powerNow", 0))
+                power_now = device_data.get("powerNow")
+                if power_now in (None, ""):
+                    power_now = energy_flow.get("totalPvPower", 0)
+                return float(power_now)
             elif self._sensor_key == "todayElectricity":
                 return float(device_data.get("todayEnergy", 0))
             elif self._sensor_key == "monthElectricity":
@@ -203,7 +215,10 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
             # Device Power Sensors - map from energy flow and device data
             elif self._sensor_key == "pvPower":
                 # Use device powerNow for real-time PV power (not solarPower which is capacity)
-                return float(device_data.get("powerNow", 0))
+                power_now = device_data.get("powerNow")
+                if power_now in (None, ""):
+                    power_now = energy_flow.get("totalPvPower", 0)
+                return float(power_now)
             elif self._sensor_key == "gridPower":
                 # Grid power from energy flow - correct field name
                 grid_power = float(energy_flow.get("sysGridPowerwatt", 0))
@@ -294,7 +309,12 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                 value = int(energy_flow.get("gridDirection", 0))
                 return DIRECTION_STATES.get(value, f"Unknown ({value})")
             elif self._sensor_key == "outPutDirection":
-                value = int(energy_flow.get("outPutDirection", 0))
+                value = int(
+                    energy_flow.get(
+                        "outputDirection",
+                        energy_flow.get("outPutDirection", 0),
+                    )
+                )
                 return DIRECTION_STATES.get(value, f"Unknown ({value})")
 
             # Battery Info from battery list

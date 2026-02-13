@@ -4,6 +4,7 @@ from typing import Final
 DOMAIN: Final = "saj_esolar_cloud"
 MANUFACTURER: Final = "SAJ"
 MODEL: Final = "H1"
+APP_PROJECT_NAME: Final = "oem4Greenheiss"
 
 # Region configuration
 CONF_REGION: Final = "region"
@@ -11,7 +12,8 @@ CONF_MONITORED_PLANTS: Final = "monitored_plants"
 
 # Regions and their base URLs
 REGIONS = {
-    "eu": "https://eop.saj-electric.com/dev-api/api/v1",
+    "eu": "https://eop.greenheiss.com/dev-api/api/v1",
+    "gh": "https://eop.greenheiss.com/dev-api/api/v1",
     "in": "https://iop.saj-electric.com/dev-api/api/v1",
     "cn": "https://op.saj-electric.cn/dev-api/api/v1"
 }
