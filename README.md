@@ -138,6 +138,19 @@ This integration is a complete rewrite focused on H1 inverters with battery stor
 - Use **"Configure"** button in the integration to modify monitored plants
 - Add or remove plants without reinstalling the integration
 
+## 🏷️ OEM Backend Notes
+
+- This build is configured for Greenheiss OEM accounts:
+  - Base API domain: `https://eop.greenheiss.com/dev-api/api/v1`
+  - `appProjectName`: `oem4Greenheiss`
+- Authentication and request signing are unchanged; only OEM metadata and host differ.
+
+## 🔀 SEC vs H1 Query Mode
+
+- For SEC plants (`queryDeviceDataType = 2`), statistics and energy flow endpoints are queried with `emsSn`.
+- For non-SEC plants, the integration keeps the legacy `deviceSn` query behavior.
+- Device list and related endpoints use the plant `officeId` for `searchOfficeIdArr` when available.
+
 ## 🔧 Advanced Features
 
 ### 🔋 **Battery Health Calculation**
