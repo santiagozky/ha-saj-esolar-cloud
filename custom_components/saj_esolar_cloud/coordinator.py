@@ -44,7 +44,13 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 region,
                 self.base_url,
             )
-        self.verify_ssl = False
+        self.verify_ssl = region != "gh"
+        _LOGGER.info(
+            "Region '%s' using base URL %s with SSL verification %s",
+            region,
+            self.base_url,
+            "enabled" if self.verify_ssl else "disabled",
+        )
         self.monitored_plants = monitored_plants or []
         self.auth_token = None
 

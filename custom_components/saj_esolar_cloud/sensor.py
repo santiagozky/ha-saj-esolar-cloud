@@ -1,6 +1,7 @@
 """SAJ eSolar sensor platform."""
 from __future__ import annotations
 from datetime import datetime
+import logging
 
 from typing import Any, cast
 
@@ -26,6 +27,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import DIRECTION_STATES, BATTERY_STATES, DOMAIN, H1_SENSORS
 from .coordinator import SAJeSolarDataUpdateCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 # Device class mapping
 DEVICE_CLASS_MAP = {
@@ -271,17 +274,18 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                 return "Yes" if int(running_state) == 1 else "No"
             elif self._sensor_key == "inverterStatus":
                 # Inverter status based on deviceStatus from plant statistics
-                device_status = plant_stats.get("deviceStatus", 2)
+                device_status = int(plant_stats.get("deviceStatus", 2))
+                has_battery = int(energy_flow.get("hasBattery", 1))
 
                 if device_status == 2:
+                    return "OK"
+                elif device_status == 0 and has_battery == 0:
+                    # SEC systems without batteries report 0 as a valid state.
                     return "OK"
                 elif device_status == 3:
                     return "Alarm"
                 else:
                     # Log unknown status for debugging
-                    from homeassistant.core import HomeAssistant
-                    import logging
-                    _LOGGER = logging.getLogger(__name__)
                     _LOGGER.warning(f"Unknown deviceStatus: {device_status} for plant {self._plant_uid}")
                     return "Alarm"
 
@@ -363,9 +367,11 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                 # Get data for this specific plant
                 plant_data = self.coordinator.data.get(self._plant_uid, {})
                 plant_stats = plant_data.get("plant_statistics", {}).get("data", {})
+                energy_flow = plant_data.get("energy_flow", {}).get("data", {})
                 device_alarms = plant_data.get("device_alarms", {}).get("data", {})
 
-                device_status = plant_stats.get("deviceStatus", 2)
+                device_status = int(plant_stats.get("deviceStatus", 2))
+                has_battery = int(energy_flow.get("hasBattery", 1))
                 attributes = {}
 
                 if device_status == 3:
@@ -381,6 +387,9 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                         attributes["alarm_state"] = alarm.get("alarmStateName", "Unknown")
                     else:
                         attributes["alarm_message"] = "Alarm status detected but no alarm details available"
+                elif device_status == 0 and has_battery == 0:
+                    # Valid SEC no-battery state, no alarm attributes.
+                    pass
                 elif device_status not in [2, 3]:
                     # Unknown device status
                     attributes["alarm_message"] = f"Unknown deviceStatus {device_status} detected"

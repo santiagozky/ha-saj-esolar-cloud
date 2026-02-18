@@ -12,7 +12,7 @@ CONF_MONITORED_PLANTS: Final = "monitored_plants"
 
 # Regions and their base URLs
 REGIONS = {
-    "eu": "https://eop.greenheiss.com/dev-api/api/v1",
+    "eu": "https://eop.saj-electric.com/dev-api/api/v1",
     "gh": "https://eop.greenheiss.com/dev-api/api/v1",
     "in": "https://iop.saj-electric.com/dev-api/api/v1",
     "cn": "https://op.saj-electric.cn/dev-api/api/v1"
