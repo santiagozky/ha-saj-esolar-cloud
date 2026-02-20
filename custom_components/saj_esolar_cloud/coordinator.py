@@ -9,7 +9,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import DOMAIN, ENDPOINTS, UPDATE_INTERVAL, REGIONS, APP_PROJECT_NAME
+from .const import (
+    DOMAIN,
+    ENDPOINTS,
+    UPDATE_INTERVAL,
+    REGIONS,
+    DEFAULT_APP_PROJECT_NAME,
+    GREENHEISS_APP_PROJECT_NAME,
+)
 from .elekeeper import calc_signature, encrypt, generatkey
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,11 +52,15 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 self.base_url,
             )
         self.verify_ssl = region != "gh"
+        self.app_project_name = (
+            GREENHEISS_APP_PROJECT_NAME if region == "gh" else DEFAULT_APP_PROJECT_NAME
+        )
         _LOGGER.info(
-            "Region '%s' using base URL %s with SSL verification %s",
+            "Region '%s' using base URL %s with SSL verification %s and appProjectName '%s'",
             region,
             self.base_url,
             "enabled" if self.verify_ssl else "disabled",
+            self.app_project_name,
         )
         self.monitored_plants = monitored_plants or []
         self.auth_token = None
@@ -87,7 +98,7 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
         """Attach common request metadata and sign payload."""
         timestamp = int(time.time() * 1000)
         metadata: dict[str, Any] = {
-            "appProjectName": APP_PROJECT_NAME,
+            "appProjectName": self.app_project_name,
             "clientDate": datetime.now().strftime("%Y-%m-%d"),
             "lang": "en",
             "timeStamp": str(timestamp) if timestamp_as_str else timestamp,

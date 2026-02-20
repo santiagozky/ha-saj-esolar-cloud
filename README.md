@@ -141,10 +141,12 @@ It started as a fork of [SAJeSolar](https://github.com/djansen1987/SAJeSolar) by
 
 ## 🏷️ OEM Backend Notes
 
-- This build is configured for Greenheiss OEM accounts:
+- Region `gh` (Greenheiss):
   - Base API domain: `https://eop.greenheiss.com/dev-api/api/v1`
   - `appProjectName`: `oem4Greenheiss`
-- Authentication and request signing are unchanged; only OEM metadata and host differ.
+- Other regions (`eu`, `in`, `cn`):
+  - Keep original SAJ `appProjectName`: `elekeeper`
+- Authentication and request signing are unchanged.
 
 ## 🔀 SEC vs H1 Query Mode
 

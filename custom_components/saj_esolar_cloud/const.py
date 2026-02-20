@@ -4,7 +4,8 @@ from typing import Final
 DOMAIN: Final = "saj_esolar_cloud"
 MANUFACTURER: Final = "SAJ"
 MODEL: Final = "H1"
-APP_PROJECT_NAME: Final = "oem4Greenheiss"
+DEFAULT_APP_PROJECT_NAME: Final = "elekeeper"
+GREENHEISS_APP_PROJECT_NAME: Final = "oem4Greenheiss"
 
 # Region configuration
 CONF_REGION: Final = "region"
