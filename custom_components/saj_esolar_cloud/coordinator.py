@@ -51,10 +51,15 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 region,
                 self.base_url,
             )
-        self.verify_ssl = region != "gh"
-        self.app_project_name = (
-            GREENHEISS_APP_PROJECT_NAME if region == "gh" else DEFAULT_APP_PROJECT_NAME
-        )
+        # Greenheiss is a reseller/OEM backend:
+        # - It requires appProjectName "oem4Greenheiss" instead of SAJ "elekeeper".
+        # - Its certificate chain is currently incomplete, so SSL verification must be disabled.
+        if region == "gh":
+            self.verify_ssl = False
+            self.app_project_name = GREENHEISS_APP_PROJECT_NAME
+        else:
+            self.verify_ssl = True
+            self.app_project_name = DEFAULT_APP_PROJECT_NAME
         _LOGGER.info(
             "Region '%s' using base URL %s with SSL verification %s and appProjectName '%s'",
             region,
@@ -113,6 +118,12 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
         device_list: dict[str, Any],
     ) -> dict[str, Any]:
         """Build request context needed to query H1 and SEC plants."""
+        # Different plant types require different identifier values in request params:
+        # - H1 endpoints expect `deviceSn` (from device list `list[0].deviceSn`).
+        # - SEC endpoints expect `emsSn` (from plant details `moduleSnList[0]` or moduleSn),
+        #   selected when `queryDeviceDataType == 2`.
+        # This centralized context avoids repeating that SEC vs H1 branching in every
+        # endpoint method and also carries `office_id` for `searchOfficeIdArr` queries.
         plant_data = plant_details.get("data", {})
         devices = device_list.get("data", {}).get("list", [])
         device_data = devices[0] if devices else {}
@@ -153,20 +164,20 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                     continue
 
                 # Get all data for this plant
-                plant_details = await self._get_plant_details_for_plant(plant_uid)
+                plant_details = await self._get_plant_details(plant_uid)
                 query_context = self._build_query_context(plant_details, {"data": {"list": []}})
-                device_list = await self._get_device_list_for_plant(
+                device_list = await self._get_device_list(
                     plant_uid, query_context["office_id"]
                 )
                 query_context = self._build_query_context(plant_details, device_list)
 
-                battery_list = await self._get_battery_list_for_plant(
+                battery_list = await self._get_battery_list(
                     plant_uid, query_context["office_id"]
                 )
-                plant_statistics = await self._get_plant_statistics_for_plant(
+                plant_statistics = await self._get_plant_statistics(
                     plant_uid, query_context
                 )
-                energy_flow = await self._get_energy_flow_for_plant(
+                energy_flow = await self._get_energy_flow(
                     plant_uid, query_context
                 )
 
@@ -249,151 +260,6 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed(f"Failed to get plant list: {resp.status}")
             return await resp.json()
 
-    async def _get_plant_details_for_plant(self, plant_uid: str) -> dict[str, Any]:
-        """Get plant details for specific plant."""
-        data = {
-            "plantUid": plant_uid,
-        }
-
-        signed = self._build_request_payload(data)
-
-        async with self._api_get(
-            ENDPOINTS["plant_detail"],
-            params=signed,
-            headers={'Authorization': self.auth_token},
-        ) as resp:
-            if resp.status != 200:
-                raise UpdateFailed(f"Failed to get plant details: {resp.status}")
-            return await resp.json()
-
-    async def _get_device_list_for_plant(
-        self,
-        plant_uid: str,
-        office_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Get device list for specific plant."""
-        data = {
-            "plantUid": plant_uid,
-            "pageSize": 100,
-            "pageNo": 1,
-            "searchOfficeIdArr": office_id or "1",
-        }
-
-        signed = self._build_request_payload(data)
-
-        async with self._api_get(
-            ENDPOINTS["device_list"],
-            params=signed,
-            headers={'Authorization': self.auth_token},
-        ) as resp:
-            if resp.status != 200:
-                raise UpdateFailed(f"Failed to get device list: {resp.status}")
-            return await resp.json()
-
-    async def _get_battery_list_for_plant(
-        self,
-        plant_uid: str,
-        office_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Get battery list for specific plant."""
-        data = {
-            "plantUid": plant_uid,
-            "pageSize": 100,
-            "pageNo": 1,
-            "searchOfficeIdArr": office_id or "1",
-        }
-
-        signed = self._build_request_payload(data)
-
-        async with self._api_get(
-            ENDPOINTS["battery_list"],
-            params=signed,
-            headers={'Authorization': self.auth_token},
-        ) as resp:
-            if resp.status != 200:
-                raise UpdateFailed(f"Failed to get battery list: {resp.status}")
-            return await resp.json()
-
-    async def _get_plant_statistics_for_plant(
-        self,
-        plant_uid: str,
-        query_context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Get plant statistics for specific plant."""
-        if query_context is None:
-            plant_details = await self._get_plant_details_for_plant(plant_uid)
-            initial_context = self._build_query_context(plant_details, {"data": {"list": []}})
-            device_list = await self._get_device_list_for_plant(
-                plant_uid, initial_context["office_id"]
-            )
-            query_context = self._build_query_context(plant_details, device_list)
-
-        data = {
-            "plantUid": plant_uid,
-        }
-
-        if query_context.get("query_device_data_type") == 2:
-            ems_sn = query_context.get("ems_sn")
-            if not ems_sn:
-                raise UpdateFailed(f"No emsSn found for SEC plant {plant_uid}")
-            data["emsSn"] = ems_sn
-        else:
-            device_sn = query_context.get("device_sn")
-            if not device_sn:
-                raise UpdateFailed(f"No device found for plant {plant_uid}")
-            data["deviceSn"] = device_sn
-
-        signed = self._build_request_payload(data)
-
-        async with self._api_get(
-            ENDPOINTS["plant_statistics"],
-            params=signed,
-            headers={'Authorization': self.auth_token},
-        ) as resp:
-            if resp.status != 200:
-                raise UpdateFailed(f"Failed to get plant statistics: {resp.status}")
-            return await resp.json()
-
-    async def _get_energy_flow_for_plant(
-        self,
-        plant_uid: str,
-        query_context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Get energy flow for specific plant."""
-        if query_context is None:
-            plant_details = await self._get_plant_details_for_plant(plant_uid)
-            initial_context = self._build_query_context(plant_details, {"data": {"list": []}})
-            device_list = await self._get_device_list_for_plant(
-                plant_uid, initial_context["office_id"]
-            )
-            query_context = self._build_query_context(plant_details, device_list)
-
-        data = {
-            "plantUid": plant_uid,
-        }
-
-        if query_context.get("query_device_data_type") == 2:
-            ems_sn = query_context.get("ems_sn")
-            if not ems_sn:
-                raise UpdateFailed(f"No emsSn found for SEC plant {plant_uid}")
-            data["emsSn"] = ems_sn
-        else:
-            device_sn = query_context.get("device_sn")
-            if not device_sn:
-                raise UpdateFailed(f"No device found for plant {plant_uid}")
-            data["deviceSn"] = device_sn
-
-        signed = self._build_request_payload(data)
-
-        async with self._api_get(
-            ENDPOINTS["energy_flow"],
-            params=signed,
-            headers={'Authorization': self.auth_token},
-        ) as resp:
-            if resp.status != 200:
-                raise UpdateFailed(f"Failed to get energy flow: {resp.status}")
-            return await resp.json()
-
     async def _get_battery_info_for_plant(
         self,
         plant_uid: str,
@@ -401,9 +267,9 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
     ) -> dict[str, Any]:
         """Get battery system info for specific plant."""
         if query_context is None:
-            plant_details = await self._get_plant_details_for_plant(plant_uid)
+            plant_details = await self._get_plant_details(plant_uid)
             initial_context = self._build_query_context(plant_details, {"data": {"list": []}})
-            device_list = await self._get_device_list_for_plant(
+            device_list = await self._get_device_list(
                 plant_uid, initial_context["office_id"]
             )
             query_context = self._build_query_context(plant_details, device_list)
@@ -434,9 +300,9 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
     ) -> dict[str, Any]:
         """Get device alarms for specific plant."""
         if query_context is None:
-            plant_details = await self._get_plant_details_for_plant(plant_uid)
+            plant_details = await self._get_plant_details(plant_uid)
             initial_context = self._build_query_context(plant_details, {"data": {"list": []}})
-            device_list = await self._get_device_list_for_plant(
+            device_list = await self._get_device_list(
                 plant_uid, initial_context["office_id"]
             )
             query_context = self._build_query_context(plant_details, device_list)
@@ -466,14 +332,34 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed(f"Failed to get device alarms: {resp.status}")
             return await resp.json()
 
-    async def _get_plant_statistics(self, plant_data: dict[str, Any]) -> dict[str, Any]:
-        """Get plant statistics data."""
-        plant = plant_data["data"]["list"][0]
-        plant_uid = plant["plantUid"]
+    async def _get_plant_statistics(
+        self,
+        plant_uid: str,
+        query_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Get plant statistics for specific plant."""
+        if query_context is None:
+            plant_details = await self._get_plant_details(plant_uid)
+            initial_context = self._build_query_context(plant_details, {"data": {"list": []}})
+            device_list = await self._get_device_list(
+                plant_uid, initial_context["office_id"]
+            )
+            query_context = self._build_query_context(plant_details, device_list)
 
         data = {
             "plantUid": plant_uid,
         }
+
+        if query_context.get("query_device_data_type") == 2:
+            ems_sn = query_context.get("ems_sn")
+            if not ems_sn:
+                raise UpdateFailed(f"No emsSn found for SEC plant {plant_uid}")
+            data["emsSn"] = ems_sn
+        else:
+            device_sn = query_context.get("device_sn")
+            if not device_sn:
+                raise UpdateFailed(f"No device found for plant {plant_uid}")
+            data["deviceSn"] = device_sn
 
         signed = self._build_request_payload(data)
 
@@ -486,14 +372,34 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed(f"Failed to get plant statistics: {resp.status}")
             return await resp.json()
 
-    async def _get_energy_flow(self, plant_data: dict[str, Any]) -> dict[str, Any]:
-        """Get energy flow data."""
-        plant = plant_data["data"]["list"][0]
-        plant_uid = plant["plantUid"]
+    async def _get_energy_flow(
+        self,
+        plant_uid: str,
+        query_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Get energy flow for specific plant."""
+        if query_context is None:
+            plant_details = await self._get_plant_details(plant_uid)
+            initial_context = self._build_query_context(plant_details, {"data": {"list": []}})
+            device_list = await self._get_device_list(
+                plant_uid, initial_context["office_id"]
+            )
+            query_context = self._build_query_context(plant_details, device_list)
 
         data = {
             "plantUid": plant_uid,
         }
+
+        if query_context.get("query_device_data_type") == 2:
+            ems_sn = query_context.get("ems_sn")
+            if not ems_sn:
+                raise UpdateFailed(f"No emsSn found for SEC plant {plant_uid}")
+            data["emsSn"] = ems_sn
+        else:
+            device_sn = query_context.get("device_sn")
+            if not device_sn:
+                raise UpdateFailed(f"No device found for plant {plant_uid}")
+            data["deviceSn"] = device_sn
 
         signed = self._build_request_payload(data)
 
@@ -506,14 +412,8 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed(f"Failed to get energy flow: {resp.status}")
             return await resp.json()
 
-    async def _get_plant_details(self, plant_data: dict[str, Any]) -> dict[str, Any]:
-        """Get plant details."""
-        if not plant_data.get("data", {}).get("list"):
-            raise UpdateFailed("No plants found")
-
-        plant = plant_data["data"]["list"][0]  # Use first plant for now
-        plant_uid = plant["plantUid"]
-
+    async def _get_plant_details(self, plant_uid: str) -> dict[str, Any]:
+        """Get plant details for specific plant."""
         data = {
             "plantUid": plant_uid,
         }
@@ -529,17 +429,17 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed(f"Failed to get plant details: {resp.status}")
             return await resp.json()
 
-    async def _get_device_list(self, plant_data: dict[str, Any]) -> dict[str, Any]:
-        """Get device list."""
-        plant = plant_data["data"]["list"][0]
-        plant_uid = plant["plantUid"]
-        office_id = str(plant.get("officeId") or "1")
-
+    async def _get_device_list(
+        self,
+        plant_uid: str,
+        office_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Get device list for specific plant."""
         data = {
             "plantUid": plant_uid,
             "pageSize": 100,
             "pageNo": 1,
-            "searchOfficeIdArr": office_id,
+            "searchOfficeIdArr": office_id or "1",
         }
 
         signed = self._build_request_payload(data)
@@ -553,17 +453,17 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed(f"Failed to get device list: {resp.status}")
             return await resp.json()
 
-    async def _get_battery_list(self, plant_data: dict[str, Any]) -> dict[str, Any]:
-        """Get battery list."""
-        plant = plant_data["data"]["list"][0]
-        plant_uid = plant["plantUid"]
-        office_id = str(plant.get("officeId") or "1")
-
+    async def _get_battery_list(
+        self,
+        plant_uid: str,
+        office_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Get battery list for specific plant."""
         data = {
             "plantUid": plant_uid,
             "pageSize": 100,
             "pageNo": 1,
-            "searchOfficeIdArr": office_id,
+            "searchOfficeIdArr": office_id or "1",
         }
 
         signed = self._build_request_payload(data)

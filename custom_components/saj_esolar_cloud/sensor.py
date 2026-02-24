@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -17,7 +17,6 @@ from homeassistant.const import (
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import (
@@ -158,6 +157,31 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
         if sensor_config["unit"]:
             self._attr_native_unit_of_measurement = sensor_config["unit"]
 
+    def _get_inverter_status_context(
+        self,
+        plant_stats: dict[str, Any],
+        energy_flow: dict[str, Any],
+    ) -> tuple[int, int]:
+        """Return normalized inverter status context."""
+        device_status = int(plant_stats.get("deviceStatus", 2))
+        has_battery = int(energy_flow.get("hasBattery", 1))
+        return device_status, has_battery
+
+    def _get_inverter_status_label(
+        self,
+        device_status: int,
+        has_battery: int,
+    ) -> str:
+        """Map inverter status values to the exposed state."""
+        if device_status == 2:
+            return "OK"
+        if device_status == 0 and has_battery == 0:
+            # SEC systems without batteries report 0 as a valid state.
+            return "OK"
+        if device_status == 3:
+            return "Alarm"
+        return "Alarm"
+
     @property
     def native_value(self) -> StateType:
         """Return the sensor value."""
@@ -166,7 +190,6 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
             plant_data = self.coordinator.data.get(self._plant_uid, {})
 
             # Get plant and device data from plant-specific structure
-            plant_details = plant_data.get("plant_details", {}).get("data", {})
             device_list = plant_data.get("device_list", {}).get("data", {}).get("list", [])
             device_data = device_list[0] if device_list else {}
 
@@ -174,8 +197,6 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
             plant_stats = plant_data.get("plant_statistics", {}).get("data", {})
             energy_flow = plant_data.get("energy_flow", {}).get("data", {})
             battery_info = plant_data.get("battery_info", {}).get("data", {})
-            device_alarms = plant_data.get("device_alarms", {}).get("data", {})
-
             # Plant Detail Sensors - map from new plant data structure
             if self._sensor_key == "nowPower":
                 power_now = device_data.get("powerNow")
@@ -274,20 +295,14 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                 return "Yes" if int(running_state) == 1 else "No"
             elif self._sensor_key == "inverterStatus":
                 # Inverter status based on deviceStatus from plant statistics
-                device_status = int(plant_stats.get("deviceStatus", 2))
-                has_battery = int(energy_flow.get("hasBattery", 1))
-
-                if device_status == 2:
-                    return "OK"
-                elif device_status == 0 and has_battery == 0:
-                    # SEC systems without batteries report 0 as a valid state.
-                    return "OK"
-                elif device_status == 3:
-                    return "Alarm"
-                else:
-                    # Log unknown status for debugging
+                device_status, has_battery = self._get_inverter_status_context(
+                    plant_stats, energy_flow
+                )
+                status_label = self._get_inverter_status_label(device_status, has_battery)
+                if device_status not in [0, 2, 3]:
+                    # Log unknown status for debugging.
                     _LOGGER.warning(f"Unknown deviceStatus: {device_status} for plant {self._plant_uid}")
-                    return "Alarm"
+                return status_label
 
             # Daily Values from plant statistics and device data - correct field names
             elif self._sensor_key == "dailyConsumption":
@@ -334,7 +349,7 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
             # For sensors we haven't mapped yet, return 0 or appropriate default
             return 0
 
-        except (KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError, ValueError):
             return None
 
     @property
@@ -370,8 +385,9 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                 energy_flow = plant_data.get("energy_flow", {}).get("data", {})
                 device_alarms = plant_data.get("device_alarms", {}).get("data", {})
 
-                device_status = int(plant_stats.get("deviceStatus", 2))
-                has_battery = int(energy_flow.get("hasBattery", 1))
+                device_status, has_battery = self._get_inverter_status_context(
+                    plant_stats, energy_flow
+                )
                 attributes = {}
 
                 if device_status == 3:

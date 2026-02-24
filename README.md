@@ -151,7 +151,7 @@ It started as a fork of [SAJeSolar](https://github.com/djansen1987/SAJeSolar) by
 ## 🔀 SEC vs H1 Query Mode
 
 - For SEC plants (`queryDeviceDataType = 2`), statistics and energy flow endpoints are queried with `emsSn`.
-- For non-SEC plants, the integration keeps the legacy `deviceSn` query behavior.
+- For H1 inverters, the integration keeps the h1 `deviceSn` query behavior.
 - Device list and related endpoints use the plant `officeId` for `searchOfficeIdArr` when available.
 
 ## 🔧 Advanced Features
