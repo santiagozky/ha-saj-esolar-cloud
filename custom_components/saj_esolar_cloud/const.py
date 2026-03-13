@@ -96,6 +96,27 @@ H1_SENSORS = {
         "state_class": "measurement",
         "unit": "%",
     },
+    "dailySelfUseRate": {
+        "name": "Today Self-Use Rate",
+        "icon": "mdi:home-percent",
+        "device_class": None,
+        "state_class": "measurement",
+        "unit": "%",
+    },
+    "dailyImportRate": {
+        "name": "Today Import Rate",
+        "icon": "mdi:transmission-tower-import",
+        "device_class": None,
+        "state_class": "measurement",
+        "unit": "%",
+    },
+    "totalImportRate": {
+        "name": "Total Import Rate",
+        "icon": "mdi:transmission-tower-import",
+        "device_class": None,
+        "state_class": "measurement",
+        "unit": "%",
+    },
     "totalPlantTreeNum": {
         "name": "Trees Planted",
         "icon": "mdi:tree",
@@ -347,6 +368,7 @@ ENDPOINTS = {
     "plant_statistics": "/monitor/home/getPlantStatisticsData",
     "plant_overview": "/monitor/home/getPlantGridOverviewInfo",
     "energy_flow": "/monitor/home/getDeviceEneryFlowData",
+    "sec_self_use_chart": "/monitor/plant/chart/getSecSelfUseEnergyData",
     "raw_data": "/monitor/deviceData/findRawdataPageList",
     "device_alarms": "/alarm/device/userAlarmPage"
 }

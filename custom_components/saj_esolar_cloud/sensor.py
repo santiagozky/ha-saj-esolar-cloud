@@ -29,6 +29,32 @@ from .coordinator import SAJeSolarDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# Plant-level sensor grouping for device split.
+HOME_SENSOR_KEYS = {
+    "totalConsumpElec",
+    "totalBuyElec",
+    "totalSellElec",
+    "selfUseRate",
+    "dailySelfUseRate",
+    "dailyImportRate",
+    "totalImportRate",
+    "dailyConsumption",
+    "dailyGridImport",
+    "dailyGridExport",
+    "gridPower",
+    "gridPowerAbsolute",
+    "outPower",
+    "totalLoadPower",
+    "dailyBatteryCharge",
+    "dailyBatteryDischarge",
+    # Requested explicitly under Home.
+    "totalPlantTreeNum",
+    "totalReduceCo2",
+    "dailyTreesPlanted",
+    "dailyReduceCo2",
+    "lastUploadTime",
+}
+
 # Device class mapping
 DEVICE_CLASS_MAP = {
     "power": SensorDeviceClass.POWER,
@@ -138,12 +164,20 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
             or device_data.get("deviceModel")
             or "H1"
         )
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, plant_uid)},
-            "name": plant_name,
-            "manufacturer": "SAJ",
-            "model": device_model,
-        }
+        if sensor_key in HOME_SENSOR_KEYS:
+            self._attr_device_info = {
+                "identifiers": {(DOMAIN, f"{plant_uid}_home")},
+                "name": f"{plant_name} Home",
+                "manufacturer": "SAJ",
+                "model": "Home Energy",
+            }
+        else:
+            self._attr_device_info = {
+                "identifiers": {(DOMAIN, f"{plant_uid}_inverter")},
+                "name": f"{plant_name} Inverter",
+                "manufacturer": "SAJ",
+                "model": device_model,
+            }
 
         # Set device class from mapping
         if sensor_config["device_class"]:
@@ -182,6 +216,21 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
             return "Alarm"
         return "Alarm"
 
+    @staticmethod
+    def _to_rate_percent(value: Any) -> float | None:
+        """Convert rate values to 0-100 percent."""
+        if value in (None, "", "--"):
+            return None
+        try:
+            numeric = float(str(value).rstrip("%"))
+        except (TypeError, ValueError):
+            return None
+        if numeric < 0:
+            return 0.0
+        if numeric <= 1:
+            numeric *= 100
+        return round(min(100.0, numeric), 2)
+
     @property
     def native_value(self) -> StateType:
         """Return the sensor value."""
@@ -196,6 +245,8 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
             # Get additional data sources for this plant
             plant_stats = plant_data.get("plant_statistics", {}).get("data", {})
             energy_flow = plant_data.get("energy_flow", {}).get("data", {})
+            self_use_daily = plant_data.get("self_use_daily", {}).get("data", {})
+            self_use_total = plant_data.get("self_use_total", {}).get("data", {})
             battery_info = plant_data.get("battery_info", {}).get("data", {})
             # Plant Detail Sensors - map from new plant data structure
             if self._sensor_key == "nowPower":
@@ -233,8 +284,21 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                         return None
                 return None
             elif self._sensor_key == "selfUseRate":
-                # This might need to be calculated from plant data
-                return float(plant_data.get("selfUseRate", "0").rstrip("%"))
+                chart_rate = self._to_rate_percent(self_use_total.get("pvSelfConsumedRate"))
+                if chart_rate is not None:
+                    return chart_rate
+
+                for key in ("pvSelfConsumedRate", "loadSelfConsumedRate", "selfUseRate"):
+                    fallback_rate = self._to_rate_percent(plant_stats.get(key))
+                    if fallback_rate is not None:
+                        return fallback_rate
+
+                total_pv = float(plant_stats.get("totalPvEnergy", 0) or 0)
+                total_sell = float(plant_stats.get("totalSellEnergy", 0) or 0)
+                if total_pv > 0:
+                    derived = ((total_pv - total_sell) / total_pv) * 100
+                    return round(max(0.0, min(100.0, derived)), 2)
+                return 0.0
 
             # Device Power Sensors - map from energy flow and device data
             elif self._sensor_key == "pvPower":
@@ -319,6 +383,12 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                 return float(plant_stats.get("todayPlantTreeNum", 0))
             elif self._sensor_key == "dailyReduceCo2":
                 return float(plant_stats.get("todayReduceCo2", 0))
+            elif self._sensor_key == "dailySelfUseRate":
+                return self._to_rate_percent(self_use_daily.get("pvSelfConsumedRate"))
+            elif self._sensor_key == "dailyImportRate":
+                return self._to_rate_percent(self_use_daily.get("loadBuyRate"))
+            elif self._sensor_key == "totalImportRate":
+                return self._to_rate_percent(self_use_total.get("loadBuyRate"))
 
             # Direction sensors from energy flow
             elif self._sensor_key == "pvDirection":

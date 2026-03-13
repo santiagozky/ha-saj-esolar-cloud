@@ -139,6 +139,44 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
             "office_id": str(plant_data.get("officeId") or "1"),
         }
 
+    async def _get_sec_self_use_chart_data(
+        self,
+        plant_uid: str,
+        query_context: dict[str, Any],
+        chart_date_type: int,
+    ) -> dict[str, Any]:
+        """Get SEC self-use chart data for daily (1) or total (5) scope."""
+        if query_context.get("query_device_data_type") != 2:
+            return {}
+
+        module_sn = query_context.get("ems_sn")
+        if not module_sn:
+            return {}
+
+        chart_day = datetime.now().strftime("%Y-%m-%d")
+        data: dict[str, Any] = {
+            "plantUid": plant_uid,
+            "moduleSn": module_sn,
+            "chartDateType": chart_date_type,
+            "chartDay": chart_day,
+            "chartDayEnd": chart_day,
+        }
+        if chart_date_type == 1:
+            data["customSearch"] = 1
+        elif chart_date_type == 5:
+            data["customSearch"] = 0
+
+        signed = self._build_request_payload(data)
+
+        async with self._api_get(
+            ENDPOINTS["sec_self_use_chart"],
+            params=signed,
+            headers={'Authorization': self.auth_token},
+        ) as resp:
+            if resp.status != 200:
+                raise UpdateFailed(f"Failed to get SEC self-use chart data: {resp.status}")
+            return await resp.json()
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via API."""
         try:
@@ -180,6 +218,32 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                 energy_flow = await self._get_energy_flow(
                     plant_uid, query_context
                 )
+                try:
+                    self_use_daily = await self._get_sec_self_use_chart_data(
+                        plant_uid,
+                        query_context,
+                        chart_date_type=1,
+                    )
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Failed to fetch daily self-use data for plant %s: %s",
+                        plant_uid,
+                        err,
+                    )
+                    self_use_daily = {}
+                try:
+                    self_use_total = await self._get_sec_self_use_chart_data(
+                        plant_uid,
+                        query_context,
+                        chart_date_type=5,
+                    )
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Failed to fetch total self-use data for plant %s: %s",
+                        plant_uid,
+                        err,
+                    )
+                    self_use_total = {}
 
                 # Get battery system info for this plant
                 battery_info = await self._get_battery_info_for_plant(
@@ -198,6 +262,8 @@ class SAJeSolarDataUpdateCoordinator(DataUpdateCoordinator):
                     "battery_list": battery_list,
                     "plant_statistics": plant_statistics,
                     "energy_flow": energy_flow,
+                    "self_use_daily": self_use_daily,
+                    "self_use_total": self_use_total,
                     "battery_info": battery_info,
                     "device_alarms": device_alarms,
                     "query_context": query_context,
