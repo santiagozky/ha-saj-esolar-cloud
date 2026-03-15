@@ -148,6 +148,7 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
         self._config = sensor_config
         self._plant_uid = plant_uid
         self._plant_name = plant_name
+        self._last_total_buy: float | None = None
 
         # Set up entity properties with plant-specific naming
         self._attr_name = f"{plant_name} {sensor_config['name']}"
@@ -217,6 +218,13 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
         return "Alarm"
 
     @staticmethod
+    def _in_midnight_window() -> bool:
+        """Return True within 10 minutes before/after midnight local time."""
+        now = dt_util.now()
+        minutes = now.hour * 60 + now.minute
+        return minutes >= (24 * 60 - 10) or minutes < 10
+
+    @staticmethod
     def _to_rate_percent(value: Any) -> float | None:
         """Convert rate values to 0-100 percent."""
         if value in (None, "", "--"):
@@ -266,7 +274,17 @@ class SAJeSolarSensor(CoordinatorEntity[SAJeSolarDataUpdateCoordinator], SensorE
                 # Use correct field names from plant statistics
                 return float(plant_stats.get("totalLoadEnergy", 0))
             elif self._sensor_key == "totalBuyElec":
-                return float(plant_stats.get("totalBuyEnergy", 0))
+                raw_value = float(plant_stats.get("totalBuyEnergy", 0))
+                # the api sometimes sends wrong values near midnight.
+                if self._in_midnight_window() and self._last_total_buy is not None:
+                    _LOGGER.warning(
+                        "Using cached total grid import during midnight window for plant %s: %s",
+                        self._plant_uid,
+                        self._last_total_buy,
+                    )
+                    return self._last_total_buy
+                self._last_total_buy = raw_value
+                return raw_value
             elif self._sensor_key == "totalSellElec":
                 return float(plant_stats.get("totalSellEnergy", 0))
             elif self._sensor_key == "totalPlantTreeNum":
